@@ -1,0 +1,14 @@
+one:
+  user: foobar
+  site: 'foo'
+  data: 'bar'
+
+two:
+  user: foobar
+  site: 'foo'
+  data: 'bar'
+
+three:
+  user: other
+  site: 'foo'
+  data: 'bar'

@@ -1,0 +1,710 @@
+/** @jsx React.DOM */
+
+
+var StatusMixin = {
+  getInitialState: function() {
+    return {
+      statusText: null,
+      isLoading: false,
+      isDirty: false
+    };
+  },
+  _status: function(context) {
+    return {
+      clearStatusText: function() {
+        this.setStatusText(null);
+      }.bind(context),
+      setStatusText: function(statusText) {
+        this.setState({
+          statusText: statusText
+        });
+      }.bind(context),
+      setLoading: function(isLoading) {
+        this.setState({
+          isLoading: isLoading
+        });
+      }.bind(context),
+      setDirty: function(isDirty) {
+        this.setState({
+          isDirty: isDirty
+        });
+      }.bind(context)
+    };
+  },
+  componentWillMount: function() {
+    this.status = this._status(this);
+  }
+};
+
+
+var generatePassword = function (length, upper, lower, digits, spaces, hyphen, underscore, special, include, exclude) {
+  var charPool = "";
+  if (upper) {
+    charPool += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  }
+  if (lower) {
+    charPool += "abcdefghijklmnopqrstuvwxyz";
+  }
+  if (digits) {
+    charPool += "0123456789";
+  }
+  if (spaces) {
+    charPool += " ";
+  }
+  if (hyphen) {
+    charPool += "-";
+  }
+  if (underscore) {
+    charPool += "_";
+  }
+  if (special) {
+    charPool += "!\"#$%&'()*+,/:;<=>?@[\\]^_`{|}~";
+  }
+  charPool += include;
+  charPool = charPool.replace(new RegExp(exclude.split("").join("|"), "g"), "");
+  uniqCharPool = "";
+  $.each(charPool.split(""), function(index, character){
+    if (uniqCharPool.indexOf(character) === -1) {
+      uniqCharPool += character;
+    }
+  });
+
+  return chance.string({
+    length: length,
+    pool: uniqCharPool
+  });
+};
+
+
+var encryptDetail = function(password, detail, noid) {
+  encrypted = {
+    site: detail.site,
+    data: sjcl.encrypt(password, JSON.stringify({
+          login: detail.login,
+          password: detail.password
+    }))
+  };
+  if (!noid) {
+    encrypted.id = detail.id;
+  }
+  return encrypted;
+};
+
+
+var decryptDetail = function(password, detail) {
+  var data = JSON.parse(sjcl.decrypt(password, detail.data));
+  return {
+    id: detail.id,
+    site: detail.site,
+    login: data.login,
+    password: data.password,
+  };
+};
+
+
+var server = {
+  login: function(login, password, success, error) {
+    response = chance.string({length: 100});
+    challenge = sjcl.encrypt(password, response);
+    $.ajax({
+      url: "/login",
+      data: {
+        login: login,
+        challenge: challenge,
+        response: response,
+      },
+      success: function(data, status, jqXHR) {
+        if (jqXHR.status == 201) {
+          success(data, status, jqXHR);
+        } else {
+          server.login_response(login, password, success, error, response, challenge, data);
+        }
+      },
+      error: error,
+      type: "POST"
+    });
+  },
+  login_response: function(login, password, success, error, response, challenge, data) {
+    try {
+      old_response = sjcl.decrypt(password, data.challenge);
+      $.ajax({
+        url: "/login",
+        data: {
+          login: login,
+          challenge: challenge,
+          response: response,
+          old_response: old_response
+        },
+        success: success,
+        error: error,
+        type: "POST"
+      });
+    } catch(e) {
+      error({status: 401});
+    }
+  },
+  logout: function() {
+    $.ajax({
+      url: "/logout",
+      type: "POST",
+    });
+  },
+  updatePassword: function(password, details, success, error) {
+    response = chance.string({length: 100});
+    challenge = sjcl.encrypt(password, response);
+    newDetails = [];
+    $.each(details, function(index, detail) {
+      newDetails.push(encryptDetail(password, detail));
+    });
+    $.ajax({
+      url: "/users",
+      data: JSON.stringify({
+        details: newDetails,
+        challenge: challenge,
+        response: response
+      }),
+      contentType: 'application/json',
+      type: "PATCH",
+      success: success,
+      error: error
+    });
+  },
+  loadDetails: function(success, error) {
+    $.ajax({
+      dataType: "json",
+      url: "/details",
+      success: success,
+      error: error,
+    });
+  },
+  processDetails: function(details, password) {
+    var processedDetails = [];
+    $.each(details, function(index, detail) {
+      processedDetails.push(decryptDetail(password, detail));
+    });
+    return processedDetails;
+  },
+  createDetail: function(detail, password, success, error) {
+    $.ajax({
+      url: "/details",
+      type: "POST",
+      data: encryptDetail(password, detail, true),
+      success: success,
+      error: error
+    });
+  },
+  deleteDetail: function(detail, success, error) {
+    $.ajax({
+      url: "/details/" + detail.id,
+      type: "DELETE",
+      success: success,
+      error: error
+    });
+  },
+  updateDetail: function(detail, password, success, error) {
+    $.ajax({
+      url: "/details/" + detail.id,
+      type: "PATCH",
+      data: encryptDetail(password, detail, true),
+      success: success,
+      error: error
+    });
+  }
+};
+
+
+window.PassMeIn = React.createClass({
+  handleLoggedin: function(password) {
+    this.setState({
+      loggedIn: true,
+      password: password
+    });
+  },
+  handleLoggedout: function() {
+    this.setState({
+      loggedIn: false
+    });
+  },
+  changePassword: function(password) {
+    this.setState({
+        password: password
+      });
+  },
+  getInitialState: function() {
+    return {
+      loggedIn: false,
+    };
+  },
+  render: function() {
+    return (
+      <div className="container">
+        {this.state.loggedIn ?
+          <LoggedinView onLoggedout={this.handleLoggedout}
+                        changePassword={this.changePassword}
+                        password={this.state.password} /> :
+          <LoginForm onLoggedin={this.handleLoggedin} />
+        }
+      </div>
+    );
+  }
+});
+
+
+var LoginForm = React.createClass({
+  mixins: [StatusMixin],
+  handleSubmit: function() {
+    var login = this.refs.login.getDOMNode().value;
+    var password = this.refs.password.getDOMNode().value;
+    server.login(login, password, this.handleLoggedin, this.handleFailedLogin);
+    this.status.setLoading(true);
+    return false;
+  },
+  handleLoggedin: function() {
+    this.status.setLoading(false);
+    var password = this.refs.password.getDOMNode().value;
+    this.props.onLoggedin(password);
+  },
+  handleFailedLogin: function(jqXHR) {
+    this.status.setLoading(false);
+    if (jqXHR.status == 401) {
+      this.status.setStatusText("Invalid credentials");
+    } else {
+      this.status.setStatusText("Server unreachable");
+    }
+  },
+  render: function() {
+    return (
+      <form className="form-horizontal" role="form" onSubmit={this.handleSubmit}>
+        {this.state.statusText !== null ?
+          <div className="col-sm-offset-2 col-sm-10 alert alert-danger" role="alert">
+            {this.state.statusText}
+          </div> :
+        ""}
+        <div className="form-group form-group-lg">
+          <label htmlFor="login" className="col-sm-2 control-label">Login</label>
+          <div className="col-sm-10">
+            <input type="text" className="form-control" autofocus ref="login" />
+          </div>
+        </div>
+        <div className="form-group form-group-lg">
+          <label htmlFor="password" className="col-sm-2 control-label">Password</label>
+          <div className="col-sm-10">
+            <input type="password" className="form-control" ref="password" />
+          </div>
+        </div>
+        <div className="form-group form-group-lg">
+          <div className="col-sm-offset-2 col-sm-10">
+            <button className="btn btn-primary btn-block" type="submit">Log in or register</button>
+            {this.state.isLoading ? <img src="<%= asset_path('spinner.gif') %>" /> : ""}
+          </div>
+        </div>
+      </form>
+    );
+  }
+});
+
+
+var LoggedinView = React.createClass({
+  mixins: [StatusMixin],
+  handleFilter: function(filter) {
+    this.setState({
+      filter: filter
+    });
+  },
+  handleEditDetail: function(detail) {
+    this.setState({
+      detailBeingEdited: detail
+    });
+  },
+  handleDoneEditingDetail: function() {
+    this.setState({
+      detailBeingEdited: null
+    });
+  },
+  getInitialState: function() {
+    return {
+      filter: "",
+      detailBeingEdited: null,
+    };
+  },
+  render: function() {
+    return (
+      <div>
+        <Nav onLoggedout={this.props.onLoggedout} onFilter={this.handleFilter} />
+        {this.state.statusText !== null ?
+          <div className="alert alert-danger">{this.state.statusText}</div> :
+          ""
+        }
+        {this.state.isLoading ?
+          <div className="alert alert-info">Loading...</div> :
+          ""
+        }
+        {this.state.detailBeingEdited === null ?
+          <div>
+            <Details isDirty={this.state.isDirty}
+                     filter={this.state.filter}
+                     password={this.props.password}
+                     status={this.status}
+                     changePassword={this.props.changePassword}
+                     onEditDetail={this.handleEditDetail} />
+            <NewDetail password={this.props.password}
+                       status={this.status} />
+          </div> :
+          <EditDetail password={this.props.password}
+                      status={this.status}
+                      onDoneEditingDetail={this.handleDoneEditingDetail}
+                      detail={this.state.detailBeingEdited} />
+        }
+      </div>
+    );
+  }
+});
+
+
+var Nav = React.createClass({
+  handleLogout: function() {
+    server.logout();
+    this.props.onLoggedout();
+  },
+  handleFilter: function() {
+    var filter = this.refs.filter.getDOMNode().value;
+    this.props.onFilter(filter);
+  },
+  render: function() {
+    return (
+      <nav className="navbar navbar-default navbar-fixed-top" role="navigation">
+        <div className="container">
+          <div className="navbar-header">
+            <span className="navbar-brand">PassMeIn</span>
+          </div>
+          <form className="navbar-form navbar-left" role="search">
+            <div className="form-group">
+              <input type="text" className="form-control" ref="filter" placeholder="Filter..." onInput={this.handleFilter} />
+            </div>
+          </form>
+          <button type="button" className="btn btn-danger navbar-btn navbar-right" onClick={this.handleLogout}>Log out</button>
+        </div>
+      </nav>
+    );
+  }
+});
+
+
+var Details = React.createClass({
+  mixins: [React.addons.LinkedStateMixin],
+  loadDetails: function() {
+    server.loadDetails(this.handleDetailsLoaded, this.handleFailedDetailsLoad);
+  },
+  handleDetailsLoaded: function(details) {
+    this.props.status.setLoading(false);
+    this.props.status.setDirty(false);
+    this.setState({
+      details: server.processDetails(details, this.props.password)
+    });
+  },
+  handleFailedDetailsLoad: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setStatusText("Couldn't load details from server");
+  },
+  handleChangePassword: function() {
+    this.props.status.setLoading(true);
+    server.updatePassword(this.state.password, this.state.details, this.handlePasswordChanged, this.handleFailedChangePassword);
+    return false;
+  },
+  handlePasswordChanged: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setStatusText("Password changed");
+    this.props.changePassword(this.state.password);
+  },
+  handleFailedChangePassword: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setStatusText("Failed to change password: server unreachable");
+  },
+  getInitialState: function() {
+    return {
+      details: [],
+      password: []
+    };
+  },
+  componentDidMount: function() {
+    this.loadDetails();
+  },
+  componentWillReceiveProps: function(nextProps) {
+    if (nextProps.isDirty) {
+      this.loadDetails();
+    }
+  },
+  render: function() {
+    var body = [];
+    $.each(this.state.details, function(index, detail) {
+      if (fuzzy.test(this.props.filter, detail.site)) {
+        body.push(
+          <Detail status={this.props.status}
+                  onEditDetail={this.props.onEditDetail}
+                  key={detail.id}
+                  detail={detail} />
+          );
+      }
+    }.bind(this));
+    return (
+      <div>
+        <div key="details-table" className="table-responsive">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Site</th><th>Login</th><th>Password</th><th>&nbsp;</th><th>&nbsp;</th>
+              </tr>
+            </thead>
+            <tbody>
+              {body}
+            </tbody>
+          </table>
+        </div>
+        <div key="password-panel" className="panel panel-default">
+          <div key="heading" className="panel-heading">Change password</div>
+          <div key="body" className="panel-body">
+            <form className="form-horizontal" role="form" onSubmit={this.handleChangePassword}>
+              <div className="form-group form-group-lg">
+                <label htmlFor="site" className="col-sm-2 control-label">Password</label>
+                <div className="col-sm-9">
+                  <input type="text" className="form-control" valueLink={this.linkState('password')} />
+                </div>
+                <div className="col-sm-1">
+                  <button className="btn btn-success btn-large" type="submit">
+                    <span className="glyphicon glyphicon-ok"></span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+});
+
+
+var NewDetail = React.createClass({
+  handleCreateDetail: function(detail) {
+    server.createDetail(detail, this.props.password, this.handleDetailCreated, this.handleFailedCreateDetail);
+    this.props.status.setLoading(true);
+  },
+  handleDetailCreated: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setStatusText("Detail created");
+    this.props.status.setDirty(true);
+  },
+  handleFailedCreateDetail: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setStatusText("Couldn't create detail: server unreachable");
+  },
+  render: function() {
+    return (
+      <DetailForm heading="New detail"
+                  onSubmit={this.handleCreateDetail} />
+    );
+  }
+});
+
+
+var EditDetail = React.createClass({
+  handleUpdateDetail: function(detail) {
+    server.updateDetail(detail, this.props.password, this.handleDetailUpdated, this.handleFailedUpdateDetail);
+    this.props.status.setLoading(true);
+  },
+  handleDetailUpdated: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setDirty(true);
+    this.props.status.setStatusText("Detail updated");
+    this.props.onDoneEditingDetail();
+  },
+  handleFailedUpdateDetail: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setStatusText("Couldn't update detail: server unreachable");
+  },
+  render: function() {
+    return (
+      <DetailForm heading="Update detail"
+                  onSubmit={this.handleUpdateDetail}
+                  onCancel={this.props.onDoneEditingDetail}
+                  detail={this.props.detail} />
+    );
+  }
+});
+
+
+var Detail = React.createClass({
+  handleEditDetail: function() {
+    this.props.onEditDetail(this.props.detail);
+  },
+  handleDeleteDetail: function() {
+    server.deleteDetail(this.props.detail, this.handleDetailDeleted, this.handleFailedDeleteDetail);
+    this.props.status.setLoading(true);
+  },
+  handleDetailDeleted: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setStatusText("Detail deleted");
+    this.props.status.setDirty(true);
+  },
+  handleFailedDeleteDetail: function() {
+    this.props.status.setLoading(false);
+    this.props.status.setStatusText("Couldn't delete detail: server unreachable");
+  },
+  render: function() {
+    return (
+      <tr>
+        <td>{this.props.detail.site}</td>
+        <td>{this.props.detail.login}</td>
+        <td>{this.props.detail.password}</td>
+        <td className="small-col">
+          <button className="btn btn-large btn-primary" onClick={this.handleEditDetail}>
+            <span className="glyphicon glyphicon-pencil"></span>
+          </button>
+        </td>
+        <td className="small-col">
+          <button className="btn btn-large btn-danger" onClick={this.handleDeleteDetail}>
+            <span className="glyphicon glyphicon-trash"></span>
+          </button>
+        </td>
+      </tr>
+    );
+  }
+});
+
+
+var DetailForm = React.createClass({
+  mixins: [React.addons.LinkedStateMixin],
+  handleGenerate: function() {
+    this.setState({
+      password: generatePassword(
+        this.state.length,
+        this.state.upper,
+        this.state.lower,
+        this.state.digits,
+        this.state.spaces,
+        this.state.hyphen,
+        this.state.underscore,
+        this.state.special,
+        this.state.include,
+        this.state.exclude
+      )
+    });
+  },
+  handleSubmit: function() {
+    this.props.onSubmit({
+      id: this.props.detail.id,
+      site: this.state.site,
+      login: this.state.login,
+      password: this.state.password,
+    });
+    this.setState({
+      site: "",
+      login: "",
+      password: ""
+    });
+    return false;
+  },
+  componentWillMount: function() {
+    this.setState({
+      site: this.props.detail.site || "",
+      login: this.props.detail.login || "",
+      password: this.props.detail.password || "",
+      length: 25,
+      upper: true,
+      lower: true,
+      digits: true,
+      spaces: true,
+      hyphen: true,
+      underscore: true,
+      special: true,
+      include: "",
+      exclude: ""
+    });
+  },
+  getDefaultProps: function() {
+    return {
+      onCancel: null,
+      detail: {}
+    };
+  },
+  render: function() {
+    return (
+      <div className="panel panel-default">
+        <div key="heading" className="panel-heading">{this.props.heading}</div>
+        <div key="body" className="panel-body">
+          <form className="form-horizontal" role="form" onSubmit={this.handleSubmit}>
+            <div className="form-group form-group-lg">
+              <label htmlFor="site" className="col-sm-2 control-label">Site</label>
+              <div className="col-sm-10">
+                <input type="text" className="form-control" ref="site" valueLink={this.linkState('site')} />
+              </div>
+            </div>
+            <div className="form-group form-group-lg">
+              <label htmlFor="login" className="col-sm-2 control-label">Login</label>
+              <div className="col-sm-10">
+                <input type="text" className="form-control" ref="login" valueLink={this.linkState('login')} />
+              </div>
+            </div>
+            <div className="form-group form-group-lg">
+              <label htmlFor="password" className="col-sm-2 control-label">Password</label>
+              <div className="col-sm-10">
+                <input type="text" className="form-control" ref="password" valueLink={this.linkState('password')} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="col-sm-2 control-label">Generate password</label>
+              <div className="col-sm-10 form">
+                <div className="form-group">
+                  <label className="checkbox-inline">
+                    <input type="checkbox" ref="lower" checkedLink={this.linkState('lower')} /> Lowercase
+                  </label>
+                  <label className="checkbox-inline">
+                    <input type="checkbox" ref="lower" checkedLink={this.linkState('upper')} /> Uppercase
+                  </label>
+                  <label className="checkbox-inline">
+                    <input type="checkbox" ref="lower" checkedLink={this.linkState('digits')} /> Digits
+                  </label>
+                  <label className="checkbox-inline">
+                    <input type="checkbox" ref="lower" checkedLink={this.linkState('spaces')} /> Space
+                  </label>
+                  <label className="checkbox-inline">
+                    <input type="checkbox" ref="lower" checkedLink={this.linkState('hyphen')} /> Hyphen
+                  </label>
+                  <label className="checkbox-inline">
+                    <input type="checkbox" ref="lower" checkedLink={this.linkState('underscore')} /> Underscore
+                  </label>
+                  <label className="checkbox-inline">
+                    <input type="checkbox" ref="lower" checkedLink={this.linkState('special')} /> Special characters
+                  </label>
+                </div>
+                <div className="form-group row">
+                  <button className="col-xs-2 btn btn-primary" type="button" onClick={this.handleGenerate}>Generate</button>
+                  <div className="col-xs-3">
+                    <div className="input-group">
+                      <div className="input-group-addon">Length</div>
+                      <input type="number" className="form-control" ref="length" valueLink={this.linkState('length')} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="form-group form-group-lg">
+              <div className="col-sm-10 col-sm-offset-2">
+                <button className="btn btn-success" type="submit">
+                  <span className="glyphicon glyphicon-ok"></span>
+                </button>
+                &nbsp;
+                {this.props.onCancel !== null ?
+                  <button className="btn btn-danger" type="button" onClick={this.props.onCancel}>
+                    <span className="glyphicon glyphicon-remove"></span>
+                  </button> :
+                  ""
+                }
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+});

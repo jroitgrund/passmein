@@ -1,0 +1,18 @@
+defaults: &defaults
+  adapter: postgresql
+  username: postgres
+  encoding: unicode
+  pool: 5
+
+development:
+  <<: *defaults
+  database: passmein_development
+
+test:
+  <<: *defaults
+  database: passmein_test
+
+production:
+  <<: *defaults
+  database: passmein_production
+

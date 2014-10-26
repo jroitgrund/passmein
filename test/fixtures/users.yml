@@ -1,0 +1,9 @@
+foobar:
+  login: foo
+  challenge: foochal
+  response: foores
+
+other:
+  login: notfoo
+  challenge: notfoochal
+  response: notfoores
