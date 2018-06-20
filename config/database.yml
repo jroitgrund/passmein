@@ -4,6 +4,6 @@ defaults: &defaults
   encoding: unicode
   pool: 5
 
-development:
+production:
   <<: *defaults
   database: passmein
