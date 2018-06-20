@@ -107,7 +107,7 @@ var server = {
     response = chance.string({length: 100});
     challenge = sjcl.encrypt(password, response);
     $.ajax({
-      url: "/login",
+      url: "login",
       data: {
         login: login,
         challenge: challenge,
@@ -128,7 +128,7 @@ var server = {
     try {
       old_response = sjcl.decrypt(password, data.challenge);
       $.ajax({
-        url: "/login",
+        url: "login",
         data: {
           login: login,
           challenge: challenge,
@@ -145,7 +145,7 @@ var server = {
   },
   logout: function() {
     $.ajax({
-      url: "/logout",
+      url: "logout",
       type: "POST",
     });
   },
@@ -157,7 +157,7 @@ var server = {
       newDetails.push(encryptDetail(password, detail));
     });
     $.ajax({
-      url: "/users",
+      url: "users",
       data: JSON.stringify({
         details: newDetails,
         challenge: challenge,
@@ -172,7 +172,7 @@ var server = {
   loadDetails: function(success, error) {
     $.ajax({
       dataType: "json",
-      url: "/details",
+      url: "details",
       success: success,
       error: error,
     });
@@ -186,7 +186,7 @@ var server = {
   },
   createDetail: function(detail, password, success, error) {
     $.ajax({
-      url: "/details",
+      url: "details",
       type: "POST",
       data: encryptDetail(password, detail, true),
       success: success,
@@ -195,7 +195,7 @@ var server = {
   },
   deleteDetail: function(detail, success, error) {
     $.ajax({
-      url: "/details/" + detail.id,
+      url: "details/" + detail.id,
       type: "DELETE",
       success: success,
       error: error
@@ -203,7 +203,7 @@ var server = {
   },
   updateDetail: function(detail, password, success, error) {
     $.ajax({
-      url: "/details/" + detail.id,
+      url: "details/" + detail.id,
       type: "PATCH",
       data: encryptDetail(password, detail, true),
       success: success,
